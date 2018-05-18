@@ -16,6 +16,38 @@ This will output the standard Nagios format:
 
 Enjoy.
 
+# Nagios3 snippets 
+
+Adding something like this might help with Nagios3 config :
+
+```
+define command {
+    command_name check_elasticsearch
+    command_line /bin/bash /etc/nagios3/check_elasticsearch -H '$HOSTADDRESS$'
+}
+
+define service {
+    hostgroup_name elasticsearch-health
+    hostgroup elasticsearch
+    service_description ES_HEALTH
+    check_command check_elasticsearch
+    use generic-service
+}
+
+define host {
+    host_name elasticsearch-a
+    alias     elasticsearch-a
+    address   192.168.0.1
+    hostgroups elasticsearch
+}
+define host {
+    host_name elasticsearch-b
+    alias     elasticsearch-b
+    address   192.168.0.2
+    hostgroups elasticsearch
+}
+```
+
 # License
 
 MIT.

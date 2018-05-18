@@ -14,8 +14,10 @@
 #   along with this program; if not, write to the Free Software
 #   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+set -u
+
 PROGNAME=`basename $0`
-VERSION="Version 0.3.0,"
+VERSION="Version 0.4.0,"
 AUTHOR="Andrew Lyon, Based on Mike Adolphs (http://www.matejunkie.com/) check_nginx.sh code. Authentication support added by Ryan Gallant"
 
 ST_OK=0
@@ -31,9 +33,11 @@ port=9200
 status_page="_cluster/health"
 output_dir=/tmp
 scheme=http
+carbon_server=""
+carbon_port=""
 carbon_key="system.:::name:::.cluster.app.elasticsearch.cluster"
-
-
+test_mode=no
+do_perfdata=no
 
 print_version() {
     echo "$VERSION $AUTHOR"
@@ -49,127 +53,127 @@ print_help() {
     echo "$PROGNAME -H localhost -P 9200 -o /tmp"
     echo ""
     echo "Options:"
-    echo "  -H/--hostname)"
-    echo "     Defines the hostname. Default is: localhost"
-    echo "  -P/--port)"
-    echo "     Defines the port. Default is: 9200"
-    echo "  -s/--secure)"
-    echo "     Use TLS. Defaults to false."
-    echo "  -o/--output-directory)"
-    echo "     Specifies where to write the tmp-file that the check creates."
-    echo "     Default is: /tmp"
-    echo "  -u/--username)"
-    echo "    Username for elasticsearch. Turns on authentication mode when set"
-    echo "  -p/--password)"
-    echo "    Password for elasticsearch. Turns on authentication mode when set"
-    echo "  -a/--auth)"
-    echo "    Turns on authentication mode with default credentials." 
+    echo "  -h - show help"
+    echo "  -v - show version number"
+    echo "  -H <hostname> - defines the hostname. Default is: localhost"
+    echo "  -P <port>     - defines the port. Default is: 9200"
+    echo "  -s            - use https (default: http)"
+    echo "  -o <output-dir>  - where to write tmp-file that the check creates (default: /tmp)"
+    echo "  -u <username>    - HTTP auth username for elasticsearch. (default: none, noauth)"
+    echo "  -p <password>    - HTTP auth password for elasticsearch. (default: none, noauth)"
+    echo "  -a               - HTTP auth - using u/p stored in this file."
+    echo "  -t <test/file.json> - suppress wget call, and use pre saved test data (only for development)" 
     exit $ST_UK
 }
 
-while test -n "$1"; do
-    case "$1" in
-        -help|-h)
+while getopts  "hvH:sP:p:au:o:c:C:k:t:" flag; do
+    case ${flag} in
+        h)
             print_help
             exit $ST_UK
             ;;
-        --version|-v)
+        v)
             print_version $PROGNAME $VERSION
             exit $ST_UK
             ;;
-        --hostname|-H)
-            hostname=$2
-            shift
+        H)
+            hostname=$OPTARG
             ;;
-        --secure|-s)
+        s)
             scheme=https
             ;;
-        --port|-P)
-            port=$2
-            shift
+        P)
+            port=$OPTARG
             ;;
-        --password|-p)
-            pass=$2
-            authentication="True"
-            shift
-            ;;
-        --username|-u)
-            user=$2
-            authentication="True"
-            shift
-            ;;
-        --auth|-a)
+        p)
+            pass=$OPTARG
             authentication="True"
             ;;
-        --output-directory|-o)
-            output_dir=$2
-            shift
+        u)
+            user=$OPTARG
+            authentication="True"
             ;;
-        --carbon-server|-c)
-            carbon_server=$2
-            shift
+        a)
+            authentication="True"
             ;;
-        --carbon-port|-C)
-            carbon_port=$2
-            shift
+        o)
+            output_dir=$OPTARG
             ;;
-        --carbon-key|-k)
-            carbon_key=$2
-            shift
+        t)
+            filename=$OPTARG
+            test_mode="yes"
             ;;
         *)
-        echo "Unknown argument: $1"
-        print_help
-        exit $ST_UK
-        ;;
+            echo "Unknown argument: $flag"
+            print_help
+            exit $ST_UK
+            ;;
     esac
-    shift
 done
 
-if [ "$authentication" = "True" ]; then 
-    pass="--password=${pass}"
-    user="--user=${user}"
-fi 
 
-get_status() {
-    filename=${PROGNAME}-${hostname}-${status_page}.1
-    filename=`echo $filename | tr -d '\/'`
-    filename=${output_dir}/${filename}
-    wget -q -t 3 -T 3 ${user} ${pass} $scheme://${hostname}:${port}/${status_page}?pretty=true -O ${filename}
-}
+# Here we go!
+which wget >/dev/null 2>&1
+if [ "$?" != "0" ]; then
+    echo "CRITICAL - wget is not installed"
+    exit $ST_CR
+fi
 
-get_vals() {
-    name=$(grep '\"cluster_name\" :' ${filename} | awk -F '"' '{print $4}')
-    status=$(grep '\"status\" :' ${filename} | awk -F '"' '{print $4}')
-    timed_out=`grep \"timed_out\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    number_nodes=`grep \"number_of_nodes\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    number_data_nodes=`grep \"number_of_data_nodes\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    active_primary_shards=`grep \"active_primary_shards\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    active_shards=`grep \"active_shards\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    relocating_shards=`grep \"relocating_shards\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    initializing_shards=`grep \"initializing_shards\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    delayed_unassigned_shards=`grep \"delayed_unassigned_shards\" ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    unassigned_shards=`grep -w '\"unassigned_shards\"' ${filename} | awk '{print $3}' | sed 's|[\r",]||g'`
-    rm -f ${filename}
-
-    # Determine the Nagios Status and Exit Code
-    if [ "$status" = "red" ]; then
-        NAGSTATUS="CRITICAL"
-        EXST=$ST_CR
-    elif [ "$status" = "yellow" ]; then
-        NAGSTATUS="WARNING"
-        EXST=$ST_WR
-    elif [ "$status" = "green" ]; then
-        NAGSTATUS="OK"
-        EXST=$ST_OK
-    else
-        NAGSTATUS="UNKNOWN"
-        EXST=$ST_UK
+if [ "$test_mode" = "no" ]; then
+    if [ -x /usr/bin/mktemp ]; then
+        filename=$(mktemp -p $output_dir --suffix=elasticsearchnagios)
+    else 
+        filename=${PROGNAME}-${hostname}-${status_page}.1
+        filename=`echo $filename | tr -d '\/'`
+        filename=${output_dir}/${filename}
     fi
-}
 
-do_output() {
-    output="elasticsearch ($name) is running. \
+    if [ "$authentication" = "True" ]; then 
+        pass="--password=${pass}"
+        user="--user=${user}"
+    fi 
+    wget -q -t 3 -T 3 ${user} ${pass} "$scheme://${hostname}:${port}/${status_page}?pretty=true" -O ${filename}
+fi
+
+if [ ! -s "$filename" ]; then
+    echo "CRITICAL - Could not connect to server $hostname"
+    exit $ST_CR
+fi
+
+
+name=$( jq -r ".cluster_name" ${filename} )
+status=$( jq -r ".status" ${filename} )
+timed_out=$( jq -r ".timed_out" ${filename} )
+number_nodes=$( jq -r ".number_of_nodes" ${filename} )
+number_data_nodes=$( jq -r ".number_of_data_nodes" ${filename} )
+active_primary_shards=$( jq -r ".active_primary_shards" ${filename} )
+active_shards=$( jq -r ".active_shards" ${filename} )
+relocating_shards=$( jq -r ".relocating_shards" ${filename} )
+initializing_shards=$( jq -r ".initializing_shards" ${filename} )
+delayed_unassigned_shards=$( jq -r ".delayed_unassigned_shards" ${filename} )
+unassigned_shards=$( jq -r ".unassigned_shards" ${filename} )
+
+# Determine the Nagios Status and Exit Code
+if [ "$status" = "red" ]; then
+    NAGSTATUS="CRITICAL"
+    EXST=$ST_CR
+elif [ "$status" = "yellow" ]; then
+    NAGSTATUS="WARNING"
+    EXST=$ST_WR
+elif [ "$status" = "green" ]; then
+    NAGSTATUS="OK"
+    EXST=$ST_OK
+else
+    NAGSTATUS="UNKNOWN"
+    EXST=$ST_UK
+fi
+
+if [ -z "$name" ]; then
+    echo "CRITICAL - Error parsing server output"
+    exit $ST_CR
+fi
+
+output="elasticsearch ($name) is running. \
 status: $status; \
 timed_out: $timed_out; \
 number_of_nodes: $number_nodes; \
@@ -180,52 +184,16 @@ relocating_shards: $relocating_shards; \
 initializing_shards: $initializing_shards; \
 delayed_unassigned_shards: $delayed_unassigned_shards; \
 unassigned_shards: $unassigned_shards "
-}
 
-do_perfdata() {
-    #perfdata="'idle'=$iproc 'active'=$aproc 'total'=$tproc"
-    perfdata="'active_primary'=$active_primary_shards 'active'=$active_shards 'relocating'=$relocating_shards 'init'=$initializing_shards 'delay_unass'=$delayed_unassigned_shards 'unass'=$unassigned_shards"
-}
-
-do_graphite() {
-    if [ "$carbon_server" != "" -a "$carbon_port" != "" ]; then
-        key=$(echo $carbon_key | sed "s/:::name:::/$name/")
-        echo "$key.cluster.status                $EXST                  $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.nodes.ttl             $number_nodes          $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.nodes.data            $number_data_nodes     $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.shards.active         $active_shards         $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.shards.active_primary $active_primary_shards $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.shards.initializing   $initializing_shards   $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.shards.relocating     $relocating_shards     $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.shards.delayed_unassigned     $delayed_unassigned_shards     $epoch" | nc -w 2 $carbon_server $carbon_port
-        echo "$key.cluster.shards.unassigned     $unassigned_shards     $epoch" | nc -w 2 $carbon_server $carbon_port
-        unset key
-    fi
-}
-
-# Here we go!
-which wget >/dev/null 2>&1
-if [ "$?" != "0" ]; then
-    echo "CRITICAL - wget is not installed"
-    exit $ST_CR
-fi
-get_status
-if [ ! -s "$filename" ]; then
-    echo "CRITICAL - Could not connect to server $hostname"
-    exit $ST_CR
-else
-    get_vals
-    if [ -z "$name" ]; then
-        echo "CRITICAL - Error parsing server output"
-        exit $ST_CR
-    else
-        do_output
-        do_perfdata
-    do_graphite
-    fi
+perfdata=""
+#perfdata="'idle'=$iproc 'active'=$aproc 'total'=$tproc"
+if [ $do_perfdata = "yes" ]; then
+    perfdata=" | 'active_primary'=$active_primary_shards 'active'=$active_shards 'relocating'=$relocating_shards 'init'=$initializing_shards 'delay_unass'=$delayed_unassigned_shards 'unass'=$unassigned_shards"
 fi
 
-COMPARE=$listql
+if [ "$test_mode" = "no" -a -f $filename ]; then
+    rm -f ${filename}
+fi
 
-echo "${NAGSTATUS} - ${output} | ${perfdata}"
+echo "${NAGSTATUS} - ${output}${perfdata}"
 exit $EXST

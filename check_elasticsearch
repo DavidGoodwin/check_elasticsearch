@@ -113,11 +113,14 @@ done
 
 
 # Here we go!
-which wget >/dev/null 2>&1
-if [ "$?" != "0" ]; then
-    echo "CRITICAL - wget is not installed"
-    exit $ST_CR
-fi
+for x in wget jq
+do
+    which $x >/dev/null 2>&1
+    if [ "$?" != "0" ]; then
+        echo "CRITICAL - $x is not installed"
+        exit $ST_CR
+    fi
+done
 
 if [ "$test_mode" = "no" ]; then
     if [ -x /usr/bin/mktemp ]; then

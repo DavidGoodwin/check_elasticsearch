@@ -14,10 +14,11 @@
 #   along with this program; if not, write to the Free Software
 #   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+
 set -u
 
 PROGNAME=`basename $0`
-VERSION="Version 0.4.0,"
+VERSION="0.4.0"
 AUTHOR="Andrew Lyon, Based on Mike Adolphs (http://www.matejunkie.com/) check_nginx.sh code. Authentication support added by Ryan Gallant"
 
 ST_OK=0
@@ -39,30 +40,30 @@ carbon_key="system.:::name:::.cluster.app.elasticsearch.cluster"
 test_mode=no
 do_perfdata=no
 
-print_version() {
-    echo "$VERSION $AUTHOR"
-}
-
 print_help() {
-    print_version $PROGNAME $VERSION
-    echo ""
-    echo "$PROGNAME is a Nagios plugin to check the cluster status of elasticsearch."
-    echo "It also parses the status page to get a few useful variables out, and return"
-    echo "them in the output."
-    echo ""
-    echo "$PROGNAME -H localhost -P 9200 -o /tmp"
-    echo ""
-    echo "Options:"
-    echo "  -h - show help"
-    echo "  -v - show version number"
-    echo "  -H <hostname> - defines the hostname. Default is: localhost"
-    echo "  -P <port>     - defines the port. Default is: 9200"
-    echo "  -s            - use https (default: http)"
-    echo "  -o <output-dir>  - where to write tmp-file that the check creates (default: /tmp)"
-    echo "  -u <username>    - HTTP auth username for elasticsearch. (default: none, noauth)"
-    echo "  -p <password>    - HTTP auth password for elasticsearch. (default: none, noauth)"
-    echo "  -a               - HTTP auth - using u/p stored in this file."
-    echo "  -t <test/file.json> - suppress wget call, and use pre saved test data (only for development)" 
+    cat <<-EOF
+
+	$PROGNAME is a Nagios plugin to check the cluster status of elasticsearch.
+	It also parses the status page to get a few useful variables out, and return
+	them in the output.
+
+	$PROGNAME -H localhost -P 9200 -o /tmp
+
+	Version: $VERSION
+
+	Options:
+	  -h               - show help
+	  -v               - show version number
+	  -H <hostname>    - defines the hostname. Default is: localhost
+	  -P <port>        - defines the port. Default is: 9200
+	  -s               - use https (default: http)
+	  -o <output-dir>  - where to write tmp-file that the check creates (default: /tmp)
+	  -u <username>    - HTTP auth username for elasticsearch. (default: none, noauth)
+	  -p <password>    - HTTP auth password for elasticsearch. (default: none, noauth)
+	  -a               - HTTP auth - using u/p stored in this file.
+	  -t <test/file.json> - suppress wget call, and use pre saved test data (only for development)
+
+EOF
     exit $ST_UK
 }
 
